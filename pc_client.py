@@ -256,6 +256,113 @@ async def run_client(
 
 
 # ---------------------------------------------------------------------------
+# Configuration Persistence & CLI Menu
+# ---------------------------------------------------------------------------
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def _load_config() -> dict:
+    """Load settings from config file."""
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_config(config: dict) -> None:
+    """Save settings to config file."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.error("Failed to save config: %s", exc)
+
+
+def _interactive_setup() -> tuple[str, int, str]:
+    """Interactively prompt user for server settings, using cached values where possible."""
+    config = _load_config()
+    saved_server = config.get("server")
+    saved_port = config.get("port", 8765)
+    saved_device_name = config.get("device_name")
+
+    default_name = _get_device_name(saved_device_name)
+
+    print("\n" + "=" * 45)
+    print("           TailClip PC Client Setup           ")
+    print("=" * 45)
+
+    if saved_server:
+        print("Uložené nastavení serveru:")
+        print(f"  Adresa:  {saved_server}:{saved_port}")
+        print(f"  Zařízení: {default_name}")
+        print("-" * 45)
+        print("[1] Připojit s uloženým nastavením (výchozí)")
+        print("[2] Nastavit nové připojení")
+        print("[3] Ukončit")
+        print("-" * 45)
+        try:
+            choice = input("Vyber možnost [1]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nUkončuji...")
+            sys.exit(0)
+
+        if choice == "3":
+            print("Ukončuji...")
+            sys.exit(0)
+        elif choice != "2":
+            return saved_server, saved_port, default_name
+
+    # Prompt for new settings
+    print("\nZadejte nové nastavení připojení:")
+    while True:
+        try:
+            server = input("Adresa serveru (IP nebo doména): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nUkončuji...")
+            sys.exit(0)
+        if server:
+            break
+        print("Chyba: Adresa serveru je povinná!")
+
+    try:
+        port_str = input(f"Port serveru [{saved_port}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\nUkončuji...")
+        sys.exit(0)
+
+    if port_str:
+        try:
+            port = int(port_str)
+        except ValueError:
+            print(f"Neplatný port, použije se výchozí: {saved_port}")
+            port = saved_port
+    else:
+        port = saved_port
+
+    try:
+        device_name = input(f"Název tohoto PC [{default_name}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\nUkončuji...")
+        sys.exit(0)
+
+    if not device_name:
+        device_name = default_name
+
+    # Save new settings
+    config = {
+        "server": server,
+        "port": port,
+        "device_name": device_name,
+    }
+    _save_config(config)
+
+    print(f"Nastavení uloženo do {CONFIG_FILE}\n")
+    return server, port, device_name
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
@@ -264,19 +371,20 @@ def main():
     )
     parser.add_argument(
         "--server", "-s",
-        required=True,
+        required=False,
+        default=None,
         help="TailClip server address (IP or hostname)",
     )
     parser.add_argument(
         "--port", "-p",
         type=int,
-        default=8765,
-        help="Server port (default: 8765)",
+        default=None,
+        help="Server port (default: 8765 or saved)",
     )
     parser.add_argument(
         "--device-name", "-n",
         default=None,
-        help="Device name (default: hostname)",
+        help="Device name (default: hostname or saved)",
     )
     parser.add_argument(
         "--targets", "-t",
@@ -285,17 +393,23 @@ def main():
     )
     args = parser.parse_args()
 
-    device_name = _get_device_name(args.device_name)
+    # Determine settings
+    if args.server:
+        server = args.server
+        port = args.port if args.port is not None else 8765
+        device_name = _get_device_name(args.device_name)
+    else:
+        server, port, device_name = _interactive_setup()
 
     log.info("TailClip PC Client")
-    log.info("  Server:  %s:%d", args.server, args.port)
+    log.info("  Server:  %s:%d", server, port)
     log.info("  Device:  %s", device_name)
     log.info("  Targets: %s", args.targets)
 
     try:
         asyncio.run(run_client(
-            server=args.server,
-            port=args.port,
+            server=server,
+            port=port,
             device_name=device_name,
             targets=args.targets,
         ))
