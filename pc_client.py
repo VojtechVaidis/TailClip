@@ -90,9 +90,10 @@ def _get_device_name(override: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Download helpers
+# Download & Upload helpers
 # ---------------------------------------------------------------------------
 DOWNLOAD_DIR = Path.home() / "Downloads" / "TailClip"
+TO_MOBILE_DIR = DOWNLOAD_DIR / "ToMobile"
 
 
 def _download_file(server_url: str, filename: str) -> None:
@@ -109,6 +110,62 @@ def _download_file(server_url: str, filename: str) -> None:
         log.info("Downloaded file: %s → %s", filename, dest)
     except Exception as exc:
         log.error("Failed to download %s: %s", filename, exc)
+
+
+def _upload_file(server_url: str, filepath: Path, from_device: str, to_devices: str) -> bool:
+    """Upload a file using standard library urllib."""
+    import urllib.request
+    import uuid
+
+    boundary = f"TailClipBoundary{uuid.uuid4().hex}"
+    
+    try:
+        with open(filepath, "rb") as f:
+            file_content = f.read()
+    except Exception as exc:
+        log.error("Failed to read file %s: %s", filepath.name, exc)
+        return False
+
+    # Construct multipart body
+    part_boundary = f"--{boundary}\r\n".encode("utf-8")
+    end_boundary = f"--{boundary}--\r\n".encode("utf-8")
+
+    body = bytearray()
+
+    # from_device field
+    body.extend(part_boundary)
+    body.extend(f'Content-Disposition: form-data; name="from_device"\r\n\r\n{from_device}\r\n'.encode("utf-8"))
+
+    # to_devices field
+    body.extend(part_boundary)
+    body.extend(f'Content-Disposition: form-data; name="to_devices"\r\n\r\n{to_devices}\r\n'.encode("utf-8"))
+
+    # file field
+    body.extend(part_boundary)
+    body.extend(f'Content-Disposition: form-data; name="file"; filename="{filepath.name}"\r\n'.encode("utf-8"))
+    body.extend(b'Content-Type: application/octet-stream\r\n\r\n')
+    body.extend(file_content)
+    body.extend(b'\r\n')
+    body.extend(end_boundary)
+
+    req = urllib.request.Request(
+        f"{server_url}/push-file",
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    )
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            status = response.status
+            if 200 <= status < 300:
+                log.info("Successfully pushed file to server: %s", filepath.name)
+                return True
+            else:
+                log.error("Failed to push file %s (status: %d)", filepath.name, status)
+                return False
+    except Exception as exc:
+        log.error("Failed to push file %s: %s", filepath.name, exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -236,12 +293,61 @@ async def run_client(
                         elif msg_type == "error":
                             log.error("Server error: %s", msg.get("message"))
 
-                # Run both tasks concurrently
+                async def file_watcher():
+                    """Watch the ToMobile directory and upload new files."""
+                    TO_MOBILE_DIR.mkdir(parents=True, exist_ok=True)
+                    while True:
+                        await asyncio.sleep(1.0)
+                        
+                        try:
+                            if not TO_MOBILE_DIR.exists():
+                                continue
+                            files = [f for f in TO_MOBILE_DIR.iterdir() if f.is_file()]
+                            for filepath in files:
+                                if filepath.name.startswith("."):
+                                    continue
+                                
+                                # Wait a moment to make sure the file is fully written
+                                try:
+                                    size_before = filepath.stat().st_size
+                                    await asyncio.sleep(0.5)
+                                    if not filepath.exists() or filepath.stat().st_size != size_before:
+                                        continue
+                                except FileNotFoundError:
+                                    continue
+                                
+                                log.info("Found file in ToMobile: %s. Uploading...", filepath.name)
+                                targets_str = "all"
+                                if isinstance(target_devices, list):
+                                    targets_str = ",".join(target_devices)
+                                
+                                success = await asyncio.to_thread(
+                                    _upload_file,
+                                    server_url,
+                                    filepath,
+                                    device_id,
+                                    targets_str
+                                )
+                                if success:
+                                    try:
+                                        filepath.unlink()
+                                        log.info("Successfully sent and deleted local file: %s", filepath.name)
+                                    except Exception as e:
+                                        log.error("Failed to delete local file %s: %s", filepath.name, e)
+                                else:
+                                    # Wait before retrying
+                                    await asyncio.sleep(2.0)
+                        except Exception as e:
+                            log.error("Error in file watcher: %s", e)
+
+                # Run tasks concurrently
                 poller_task = asyncio.create_task(clipboard_poller())
+                watcher_task = asyncio.create_task(file_watcher())
                 try:
                     await message_receiver()
                 finally:
                     poller_task.cancel()
+                    watcher_task.cancel()
 
         except asyncio.CancelledError:
             log.info("Client cancelled, shutting down")
