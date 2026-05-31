@@ -211,6 +211,7 @@ fun MainScreen(
                     files = uiState.downloadedFiles,
                     onRefresh = viewModel::refreshDownloadedFiles,
                     onOpenFile = viewModel::openFile,
+                    onDeleteFile = viewModel::deleteFile,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
@@ -297,6 +298,7 @@ private fun FilesTabContent(
     files: List<java.io.File>,
     onRefresh: () -> Unit,
     onOpenFile: (java.io.File) -> Unit,
+    onDeleteFile: (java.io.File) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -342,7 +344,11 @@ private fun FilesTabContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(files) { file ->
-                    FileRowItem(file = file, onClick = { onOpenFile(file) })
+                    FileRowItem(
+                        file = file,
+                        onClick = { onOpenFile(file) },
+                        onDelete = { onDeleteFile(file) }
+                    )
                 }
             }
         }
@@ -352,7 +358,8 @@ private fun FilesTabContent(
 @Composable
 private fun FileRowItem(
     file: java.io.File,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val ext = file.extension.lowercase()
     val isImage = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
@@ -414,12 +421,16 @@ private fun FileRowItem(
 
             Spacer(Modifier.width(8.dp))
 
-            // Action icon
-            Text(
-                text = "👁️",
-                fontSize = 20.sp,
-                modifier = Modifier.padding(8.dp)
-            )
+            // Delete button
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Text(
+                    text = "🗑️",
+                    fontSize = 20.sp
+                )
+            }
         }
     }
 }

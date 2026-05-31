@@ -224,6 +224,27 @@ class MainScreenViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun deleteFile(file: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (file.exists()) {
+                    val success = file.delete()
+                    if (success) {
+                        refreshDownloadedFiles()
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(getApplication(), "Soubor se nepodařilo smazat.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), "Chyba při mazání: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     companion object {
         /** Get a stable device ID from Android Settings. */
         fun getAndroidId(context: android.content.Context): String {
