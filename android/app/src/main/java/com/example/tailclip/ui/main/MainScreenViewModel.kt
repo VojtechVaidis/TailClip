@@ -10,8 +10,10 @@ import com.example.tailclip.data.SettingsRepository
 import com.example.tailclip.service.ClipboardForegroundService
 import com.example.tailclip.ws.ConnectionState
 import com.example.tailclip.ws.WebSocketManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * UI state for the main screen.
@@ -29,6 +31,7 @@ data class MainUiState(
     val sendToAll: Boolean = true,
     /** Set of checked device IDs (used when sendToAll is false) */
     val selectedDeviceIds: Set<String> = emptySet(),
+    val downloadedFiles: List<java.io.File> = emptyList(),
 )
 
 /**
@@ -41,6 +44,14 @@ class MainScreenViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private val downloadReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
+                refreshDownloadedFiles()
+            }
+        }
+    }
 
     init {
         // Observe persisted settings
@@ -96,6 +107,26 @@ class MainScreenViewModel(application: Application) : AndroidViewModel(applicati
                     it.copy(lastSyncPreview = "${msg.fromName}: ${msg.content.take(80)}")
                 }
             }
+        }
+
+        // Register download complete receiver
+        val filter = android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            application.registerReceiver(downloadReceiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        } else {
+            application.registerReceiver(downloadReceiver, filter)
+        }
+
+        // Load files initially
+        refreshDownloadedFiles()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            getApplication<Application>().unregisterReceiver(downloadReceiver)
+        } catch (e: Exception) {
+            // ignore
         }
     }
 
@@ -157,6 +188,39 @@ class MainScreenViewModel(application: Application) : AndroidViewModel(applicati
                 }
             }
             ClipboardForegroundService.start(ctx)
+        }
+    }
+
+    fun refreshDownloadedFiles() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ctx = getApplication<Application>()
+            val dir = java.io.File(ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "TailClip")
+            if (dir.exists() && dir.isDirectory) {
+                val filesList = dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
+                _uiState.update { it.copy(downloadedFiles = filesList) }
+            } else {
+                _uiState.update { it.copy(downloadedFiles = emptyList()) }
+            }
+        }
+    }
+
+    fun openFile(file: java.io.File) {
+        val context = getApplication<Application>()
+        try {
+            val authority = "${context.packageName}.fileprovider"
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
+            
+            val extension = file.extension.lowercase()
+            val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
+            
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Nelze otevřít soubor: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
