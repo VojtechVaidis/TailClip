@@ -97,7 +97,7 @@ object HttpManager {
                 .setTitle(filename)
                 .setDescription("Downloading from PC via TailClip")
                 .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "TailClip/$filename")
+                .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, "TailClip/$filename")
             
             val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
             downloadManager.enqueue(request)

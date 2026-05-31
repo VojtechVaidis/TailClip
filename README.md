@@ -13,8 +13,10 @@ TailClip je nástroj pro bleskurychlou, obousměrnou synchronizaci schránky a s
 - **Cílené odesílání**: Vyber si, na jaké zařízení chceš schránku poslat – na jedno konkrétní, na vybraná, nebo na všechna.
 - **Okamžitá synchronizace textu**: Zkopíruješ text na PC a okamžitě se objeví ve schránce na zvoleném zařízení.
 - **Z Androidu do PC (Sdílení)**: Text i soubory odesílej přes nativní **Menu sdílení** – stačí označit text nebo vybrat soubor, dát "Sdílet" a vybrat TailClip.
+- **Složka ToMobile na PC**: Rychlé posílání souborů a obrázků přetažením do složky `~/Downloads/TailClip/ToMobile/` na PC – klient je automaticky odešle a složku vyčistí.
+- **Prohlížeč souborů v mobilu**: Nová záložka **Soubory** v Android aplikaci, kde si můžeš procházet všechny stažené soubory, prohlížet si náhledy fotek a otevírat je přímo v systému.
 - **Dlaždice (Quick Settings)**: Praktická dlaždice v horní liště Androidu pro manuální odeslání schránky.
-- **Obousměrné soubory**: Posílej fotky a dokumenty z mobilu do PC přes Sdílení, nebo z PC do mobilu přes terminálový skript.
+- **Interaktivní nastavení PC**: Spuštění klienta bez argumentů otevře přehledné textové menu pro zadání IP/portu a nastavení uloží.
 - 🚧 **Windows a macOS**: Verze pro Windows a macOS jsou aktuálně ve fázi vývoje (WIP).
 
 ## 🛠️ Architektura
@@ -51,11 +53,17 @@ Na každém PC, kde chceš synchronizaci schránky:
 ```bash
 cd TailClip
 source .venv/bin/activate
+python pc_client.py
+```
+*Tip: Pokud spustíš klienta bez parametrů, provede tě interaktivním nastavením a uloží konfiguraci do `~/.config/tailclip/config.json`.*
+
+Pokud chceš spouštět přímo s parametry (např. pro spouštění na pozadí):
+```bash
 python pc_client.py --server <IP_SERVERU> --port 8765 --device-name "Můj PC"
 ```
 
 Volitelné parametry:
-- `--device-name` / `-n` – Název zařízení (výchozí: hostname)
+- `--device-name` / `-n` – Název zařízení (výchozí: hostname/uložený)
 - `--targets` / `-t` – Cílová zařízení: `all` nebo čárkou oddělené ID (výchozí: `all`)
 
 ### 3. Android Klient
@@ -73,9 +81,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 5. V sekci **Connected Devices** si vyber, kam chceš posílat.
 
 ### 4. Jak synchronizovat
-- **PC → Zařízení**: Zkopíruj text na PC (`Ctrl+C`). Automaticky se pošle na zvolená zařízení.
-- **Android → Zařízení**: Označ text nebo soubor, dej **Sdílet** a vyber **TailClip**.
-- **Soubory z PC**: `./tailclip-send.sh soubor.jpg --server <IP> --to all`
+- **PC → Zařízení (Text)**: Zkopíruj text na PC (`Ctrl+C`). Automaticky se pošle na zvolená zařízení.
+- **Android → Zařízení (Text & Soubory)**: Označ text nebo soubor, dej **Sdílet** a vyber **TailClip**.
+- **PC → Zařízení (Soubory)**: 
+  - Přetáhni soubory do složky `~/Downloads/TailClip/ToMobile/`. PC klient je automaticky nahraje na server a pošle na cílová zařízení.
+  - Nebo použij skript: `./tailclip-send.sh soubor.jpg --server <IP> --to all`
 
 ### 5. REST API
 - `GET /health` – Zdraví serveru + počet připojených zařízení
@@ -98,8 +108,10 @@ TailClip is a seamless, multi-device clipboard and file synchronization tool des
 - **Targeted Delivery**: Choose to send clipboard to a specific device, selected devices, or all connected devices.
 - **Instant Text Sync**: Copy text on any device and it instantly appears on your selected target devices.
 - **Android to PC (Share Menu)**: Send text or files from Android via the native **Share Menu**.
+- **ToMobile Folder on PC**: Send files to mobile devices by dropping them into `~/Downloads/TailClip/ToMobile/` on your PC – the client uploads them and cleans the folder.
+- **Mobile Files Browser**: A new **Files** tab in the Android app to view downloaded files with photo previews and open them in default viewers.
 - **Quick Settings Tile**: A handy Android tile to manually push your clipboard.
-- **Bidirectional File Sharing**: Send files from Android to PC via Share, or from PC to devices via the CLI script.
+- **Interactive PC Setup**: Running the client without parameters opens a CLI setup wizard and saves settings.
 - 🚧 **Windows & macOS**: Support for Windows and macOS is currently a Work In Progress (WIP).
 
 ## 🛠️ Architecture
@@ -124,11 +136,17 @@ On each PC that should have clipboard sync:
 ```bash
 cd TailClip
 source .venv/bin/activate
+python pc_client.py
+```
+*Tip: Running without parameters starts an interactive configuration menu and saves settings to `~/.config/tailclip/config.json`.*
+
+Or run directly with parameters (useful for background scripts):
+```bash
 python pc_client.py --server <SERVER_IP> --port 8765 --device-name "My PC"
 ```
 
 Optional flags:
-- `--device-name` / `-n` – Device display name (default: hostname)
+- `--device-name` / `-n` – Device display name (default: hostname/saved)
 - `--targets` / `-t` – Target devices: `all` or comma-separated IDs (default: `all`)
 
 ### 3. Android App
@@ -148,7 +166,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ### 4. How to Sync
 - **PC → Devices (Text)**: Simply copy text (`Ctrl+C`) on your Linux PC. It automatically syncs to selected target devices.
 - **Android → Devices (Text & Files)**: Highlight text or select a file, tap **Share**, and choose **TailClip**.
-- **PC → Devices (Files)**: `./tailclip-send.sh /path/to/file.jpg --server <IP> --to all`
+- **PC → Devices (Files)**: 
+  - Drop files into `~/Downloads/TailClip/ToMobile/` directory. The PC client will upload them and send to selected targets.
+  - Or use the CLI script: `./tailclip-send.sh /path/to/file.jpg --server <IP> --to all`
 
 ### 5. WebSocket Protocol (JSON)
 All messages use JSON format:
