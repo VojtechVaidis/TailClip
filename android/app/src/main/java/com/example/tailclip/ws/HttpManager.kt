@@ -17,10 +17,17 @@ object HttpManager {
      * Uploads a file via HTTP POST (multipart/form-data) to the backend.
      * Uses HttpURLConnection to stream the file, preventing OutOfMemory errors for large files.
      */
-    suspend fun uploadFile(context: Context, uri: Uri, host: String, port: Int): Boolean = withContext(Dispatchers.IO) {
+    suspend fun uploadFile(
+        context: Context,
+        uri: Uri,
+        host: String,
+        port: Int,
+        fromDevice: String = "unknown",
+        toDevices: String = "all"
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             val filename = getFileName(context, uri) ?: "shared_file.dat"
-            val url = URL("http://$host:$port/upload")
+            val url = URL("http://$host:$port/push-file")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.doOutput = true
@@ -29,7 +36,17 @@ object HttpManager {
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             
             connection.outputStream.use { os ->
-                // Write multipart header
+                // Write from_device field
+                os.write("--$boundary\r\n".toByteArray())
+                os.write("Content-Disposition: form-data; name=\"from_device\"\r\n\r\n".toByteArray())
+                os.write("$fromDevice\r\n".toByteArray())
+
+                // Write to_devices field
+                os.write("--$boundary\r\n".toByteArray())
+                os.write("Content-Disposition: form-data; name=\"to_devices\"\r\n\r\n".toByteArray())
+                os.write("$toDevices\r\n".toByteArray())
+
+                // Write file field
                 os.write("--$boundary\r\n".toByteArray())
                 os.write("Content-Disposition: form-data; name=\"file\"; filename=\"$filename\"\r\n".toByteArray())
                 os.write("Content-Type: application/octet-stream\r\n\r\n".toByteArray())

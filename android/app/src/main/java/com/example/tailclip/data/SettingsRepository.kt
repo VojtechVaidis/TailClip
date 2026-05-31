@@ -1,6 +1,7 @@
 package com.example.tailclip.data
 
 import android.content.Context
+import android.os.Build
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,18 +17,35 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class Settings(
     val host: String = "",
     val port: Int = 8765,
-    val autoConnect: Boolean = false
+    val autoConnect: Boolean = false,
+    val deviceName: String = "",
+    /** Comma-separated device IDs, or "all" */
+    val targetDevices: String = "all",
 )
 
 /**
- * Persists TailClip settings (host, port, autoConnect) using Jetpack DataStore.
+ * Persists TailClip settings (host, port, autoConnect, deviceName, targetDevices)
+ * using Jetpack DataStore.
  */
 class SettingsRepository(private val context: Context) {
 
-    private companion object {
-        val HOST_KEY = stringPreferencesKey("host")
-        val PORT_KEY = intPreferencesKey("port")
-        val AUTO_CONNECT_KEY = booleanPreferencesKey("auto_connect")
+    companion object {
+        private val HOST_KEY = stringPreferencesKey("host")
+        private val PORT_KEY = intPreferencesKey("port")
+        private val AUTO_CONNECT_KEY = booleanPreferencesKey("auto_connect")
+        private val DEVICE_NAME_KEY = stringPreferencesKey("device_name")
+        private val TARGET_DEVICES_KEY = stringPreferencesKey("target_devices")
+
+        /** Auto-detect a friendly device name from the build model. */
+        fun getDefaultDeviceName(): String {
+            val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+            val model = Build.MODEL
+            return if (model.startsWith(manufacturer, ignoreCase = true)) {
+                model
+            } else {
+                "$manufacturer $model"
+            }
+        }
     }
 
     /** Observable stream of current settings. */
@@ -35,7 +53,9 @@ class SettingsRepository(private val context: Context) {
         Settings(
             host = prefs[HOST_KEY] ?: "",
             port = prefs[PORT_KEY] ?: 8765,
-            autoConnect = prefs[AUTO_CONNECT_KEY] ?: false
+            autoConnect = prefs[AUTO_CONNECT_KEY] ?: false,
+            deviceName = prefs[DEVICE_NAME_KEY] ?: getDefaultDeviceName(),
+            targetDevices = prefs[TARGET_DEVICES_KEY] ?: "all",
         )
     }
 
@@ -52,5 +72,18 @@ class SettingsRepository(private val context: Context) {
     /** Update auto-connect preference. */
     suspend fun setAutoConnect(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_CONNECT_KEY] = enabled }
+    }
+
+    /** Update display name for this device. */
+    suspend fun setDeviceName(name: String) {
+        context.dataStore.edit { it[DEVICE_NAME_KEY] = name }
+    }
+
+    /**
+     * Update target devices.
+     * @param targets "all" or comma-separated device IDs
+     */
+    suspend fun setTargetDevices(targets: String) {
+        context.dataStore.edit { it[TARGET_DEVICES_KEY] = targets }
     }
 }

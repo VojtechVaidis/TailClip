@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings.Secure
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -25,8 +26,11 @@ import kotlinx.coroutines.flow.first
 /**
  * Foreground service that keeps a persistent WebSocket connection alive.
  *
- * When the server sends clipboard text (PC → Mobile direction),
+ * When the server sends clipboard text (from any device),
  * this service writes it to the system ClipboardManager.
+ *
+ * Clipboard changes detected via polling are sent to the server
+ * with the configured target device selection.
  */
 class ClipboardForegroundService : Service() {
 
@@ -61,7 +65,7 @@ class ClipboardForegroundService : Service() {
         serviceScope.launch {
             while (isActive) {
                 delay(1000) // Poll every 1 second
-                
+
                 if (WebSocketManager.connectionState.value != ConnectionState.CONNECTED) {
                     continue
                 }
@@ -71,16 +75,25 @@ class ClipboardForegroundService : Service() {
                         val clip = clipboardManager.primaryClip
                         if (clip != null && clip.itemCount > 0) {
                             val text = clip.getItemAt(0).coerceToText(this@ClipboardForegroundService).toString()
-                            
-                            // Only send if it's new text, not empty, and not what we just received from PC
+
+                            // Only send if it's new text, not empty, and not what we just received
                             if (text.isNotBlank() && text != lastPolledText && text != lastReceivedText) {
                                 lastPolledText = text
-                                
-                                // Send to PC in background thread
+
+                                // Read target devices from settings
                                 serviceScope.launch {
-                                    val success = WebSocketManager.send(text)
+                                    val prefs = settingsRepository.settings.first()
+                                    val targets: Any = if (prefs.targetDevices == "all") {
+                                        "all"
+                                    } else {
+                                        prefs.targetDevices.split(",")
+                                            .map { it.trim() }
+                                            .filter { it.isNotEmpty() }
+                                    }
+
+                                    val success = WebSocketManager.sendClipboard(text, targets)
                                     if (success) {
-                                        Log.i(TAG, "Auto-polled clipboard sent to PC (${text.length} chars)")
+                                        Log.i(TAG, "Auto-polled clipboard sent (${text.length} chars) → $targets")
                                     }
                                 }
                             }
@@ -128,7 +141,13 @@ class ClipboardForegroundService : Service() {
                 return@launch
             }
 
-            WebSocketManager.connect(settings.host, settings.port)
+            // Get stable device ID from Android Settings
+            val deviceId = Secure.getString(contentResolver, Secure.ANDROID_ID) ?: "unknown"
+            val deviceName = settings.deviceName.ifBlank {
+                SettingsRepository.getDefaultDeviceName()
+            }
+
+            WebSocketManager.connect(settings.host, settings.port, deviceId, deviceName)
 
             // Update notification on connection state changes
             launch {
@@ -142,30 +161,30 @@ class ClipboardForegroundService : Service() {
                 }
             }
 
-            // Handle incoming clipboard content or file downloads
+            // Handle incoming clipboard content
             launch {
-                WebSocketManager.incomingMessages.collect { text ->
-                    if (text.startsWith("[TAILCLIP_FILE]:")) {
-                        val encodedFilename = text.removePrefix("[TAILCLIP_FILE]:")
-                        val filename = URLDecoder.decode(encodedFilename, "UTF-8")
-                        Log.i(TAG, "Received file trigger for: $filename")
-                        
-                        val prefs = settingsRepository.settings.first()
-                        HttpManager.downloadFile(applicationContext, filename, prefs.host, prefs.port)
-                        updateNotification("📁 Downloading: $filename")
-                    } else {
-                        Log.i(TAG, "Received clipboard (${text.length} chars) – writing to system clipboard")
-                        withContext(Dispatchers.Main) {
-                            lastReceivedText = text
-                            lastPolledText = text // Prevent poller from echoing it back
-                            val clip = ClipData.newPlainText("TailClip", text)
-                            clipboardManager.setPrimaryClip(clip)
-                        }
-                        updateNotification("📋 Synced: ${text.take(40)}${if (text.length > 40) "…" else ""}")
+                WebSocketManager.incomingClipboard.collect { msg ->
+                    Log.i(TAG, "Received clipboard from ${msg.fromName} (${msg.content.length} chars)")
+                    withContext(Dispatchers.Main) {
+                        lastReceivedText = msg.content
+                        lastPolledText = msg.content // Prevent poller from echoing it back
+                        val clip = ClipData.newPlainText("TailClip", msg.content)
+                        clipboardManager.setPrimaryClip(clip)
                     }
+                    updateNotification("📋 From ${msg.fromName}: ${msg.content.take(30)}${if (msg.content.length > 30) "…" else ""}")
                 }
             }
-            
+
+            // Handle incoming file notifications
+            launch {
+                WebSocketManager.incomingFiles.collect { fileMsg ->
+                    Log.i(TAG, "File from ${fileMsg.fromName}: ${fileMsg.filename}")
+                    val prefs = settingsRepository.settings.first()
+                    HttpManager.downloadFile(applicationContext, fileMsg.filename, prefs.host, prefs.port)
+                    updateNotification("📁 File from ${fileMsg.fromName}: ${fileMsg.filename}")
+                }
+            }
+
             // Start the background poller
             startClipboardPolling()
         }

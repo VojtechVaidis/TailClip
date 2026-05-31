@@ -6,15 +6,18 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 import android.widget.Toast
+import com.example.tailclip.data.SettingsRepository
 import com.example.tailclip.ws.ConnectionState
 import com.example.tailclip.ws.WebSocketManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 
 /**
- * Quick Settings tile that sends the current clipboard content to the PC.
+ * Quick Settings tile that sends the current clipboard content to selected devices.
  *
- * Mobile → PC direction: user copies text, pulls down Quick Settings,
- * taps the TailClip tile, and the clipboard content is sent via WebSocket.
+ * Mobile → other devices: user copies text, pulls down Quick Settings,
+ * taps the TailClip tile, and the clipboard content is sent via WebSocket
+ * to the configured target devices.
  */
 class ClipboardTileService : TileService() {
 
@@ -55,11 +58,22 @@ class ClipboardTileService : TileService() {
         }
 
         tileScope.launch {
-            val success = WebSocketManager.send(text)
+            // Read target devices from settings
+            val settings = SettingsRepository(applicationContext)
+            val prefs = settings.settings.first()
+            val targets: Any = if (prefs.targetDevices == "all") {
+                "all"
+            } else {
+                prefs.targetDevices.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+            }
+
+            val success = WebSocketManager.sendClipboard(text, targets)
             withContext(Dispatchers.Main) {
                 if (success) {
                     showToast("TailClip: Sent ✓")
-                    Log.i(TAG, "Sent clipboard (${text.length} chars)")
+                    Log.i(TAG, "Sent clipboard (${text.length} chars) → $targets")
                 } else {
                     showToast("TailClip: Send failed")
                     Log.w(TAG, "Failed to send clipboard")

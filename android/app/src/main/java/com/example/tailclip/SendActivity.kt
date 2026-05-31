@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 
 /**
  * An invisible activity that handles "Share" actions from other apps.
- * Allows sending text to PC via Android's native Share menu.
+ * Allows sending text to connected devices via Android's native Share menu.
+ * Uses the configured target device selection from settings.
  */
 class SendActivity : ComponentActivity() {
 
@@ -60,20 +61,36 @@ class SendActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Read target devices from settings and return as the appropriate type.
+     */
+    private suspend fun getTargets(): Any {
+        val settings = SettingsRepository(applicationContext)
+        val prefs = settings.settings.first()
+        return if (prefs.targetDevices == "all") {
+            "all"
+        } else {
+            prefs.targetDevices.split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+        }
+    }
+
     private fun sendToPc(text: String) {
         val state = WebSocketManager.connectionState.value
         if (state != ConnectionState.CONNECTED) {
-            Toast.makeText(this, "TailClip: Not connected to PC", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "TailClip: Not connected", Toast.LENGTH_SHORT).show()
             Log.w("SendActivity", "Not connected")
             finish()
             return
         }
 
         lifecycleScope.launch {
-            val success = WebSocketManager.send(text)
+            val targets = getTargets()
+            val success = WebSocketManager.sendClipboard(text, targets)
             if (success) {
                 Toast.makeText(this@SendActivity, "TailClip: Text sent ✓", Toast.LENGTH_SHORT).show()
-                Log.i("SendActivity", "Sent ${text.length} chars from Share menu")
+                Log.i("SendActivity", "Sent ${text.length} chars from Share menu → $targets")
             } else {
                 Toast.makeText(this@SendActivity, "TailClip: Send failed", Toast.LENGTH_SHORT).show()
             }
@@ -84,12 +101,13 @@ class SendActivity : ComponentActivity() {
     private fun uploadFiles(uris: List<Uri>) {
         val state = WebSocketManager.connectionState.value
         if (state != ConnectionState.CONNECTED) {
-            Toast.makeText(this, "TailClip: Not connected to PC", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "TailClip: Not connected", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
         val settings = SettingsRepository(applicationContext)
+        val deviceId = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "unknown"
 
         lifecycleScope.launch {
             Toast.makeText(this@SendActivity, "TailClip: Sending...", Toast.LENGTH_SHORT).show()
@@ -97,7 +115,14 @@ class SendActivity : ComponentActivity() {
             var successCount = 0
 
             for (uri in uris) {
-                val success = HttpManager.uploadFile(applicationContext, uri, prefs.host, prefs.port)
+                val success = HttpManager.uploadFile(
+                    context = applicationContext,
+                    uri = uri,
+                    host = prefs.host,
+                    port = prefs.port,
+                    fromDevice = deviceId,
+                    toDevices = prefs.targetDevices
+                )
                 if (success) successCount++
             }
 
