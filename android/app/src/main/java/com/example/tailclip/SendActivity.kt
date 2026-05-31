@@ -107,6 +107,7 @@ class SendActivity : ComponentActivity() {
         }
 
         val settings = SettingsRepository(applicationContext)
+        val deviceId = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "unknown"
 
         lifecycleScope.launch {
             Toast.makeText(this@SendActivity, "TailClip: Sending...", Toast.LENGTH_SHORT).show()
@@ -114,7 +115,14 @@ class SendActivity : ComponentActivity() {
             var successCount = 0
 
             for (uri in uris) {
-                val success = HttpManager.uploadFile(applicationContext, uri, prefs.host, prefs.port)
+                val success = HttpManager.uploadFile(
+                    context = applicationContext,
+                    uri = uri,
+                    host = prefs.host,
+                    port = prefs.port,
+                    fromDevice = deviceId,
+                    toDevices = prefs.targetDevices
+                )
                 if (success) successCount++
             }
 
